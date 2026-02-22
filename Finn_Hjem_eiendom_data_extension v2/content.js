@@ -59,6 +59,37 @@ const makeTimestamp = () => {
   const now = new Date();
   return `${now.getDate().toString().padStart(2,'0')}.${(now.getMonth()+1).toString().padStart(2,'0')}.${now.getFullYear()} ${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
 };
+const parseCadastre = (text) => {
+  const get = (label) => {
+    const match = text.match(new RegExp(label + '\\s*:\\s*(\\d+)'));
+    return match ? match[1] : '';
+  };
+  return {
+    kommune: get('Kommunenr'),
+    gaard: get('Gårdsnr'),
+    bruk: get('Bruksnr'),
+    seksjon: get('Seksjonsnr')
+  };
+};
+const getFinnBroker = () => {
+  try {
+    const router = window.__reactRouterDataRouter;
+    const loaderData = router?.state?.loaderData;
+    if (!loaderData) return '';
+    for (const key of Object.keys(loaderData)) {
+      const generalText = loaderData[key]?.objectData?.ad?.generalText;
+      if (Array.isArray(generalText)) {
+        const entry = generalText.find(e => e.heading === 'Oppdragsansvarlig');
+        if (entry?.textUnsafe) {
+          const tmp = document.createElement('div');
+          tmp.innerHTML = entry.textUnsafe;
+          return tmp.textContent.trim();
+        }
+      }
+    }
+  } catch (e) { console.log('[ExtractorExt] Broker extraction failed:', e.message); }
+  return '';
+};
 
 // --- Hjem.no specific data extraction ---
 const extractHjemData = () => {
@@ -107,11 +138,18 @@ const extractHjemData = () => {
         getHjemTextByLabel('Fellesgjeld') || ''
       ];
 
-      // Last 3 date fields: Visning, Sist endret, Timestamp
+      // Date fields: Visning, Sist endret, Timestamp
       const viewingText = getText('[data-testid*="viewing"], [data-testid*="visning"]');
       fields.push(viewingText ? parseNorwegianDateTime(viewingText) : '');
       fields.push(getHjemTextByLabel('Sist endret') || '');
       fields.push(makeTimestamp());
+
+      // Matrikkelinfo (4 fields) + Megler (1 field) — after date fields to match Excel column order
+      fields.push(getHjemTextByLabel('Kommunenr') || '');
+      fields.push(getHjemTextByLabel('Gårdsnr') || '');
+      fields.push(getHjemTextByLabel('Bruksnr') || '');
+      fields.push(getHjemTextByLabel('Seksjonsnr') || '');
+      fields.push(''); // Megler — not available on Hjem.no
 
       // Count non-empty fields (skip URL and timestamp which are always filled)
       const dataFields = fields.slice(1, -1);
@@ -151,7 +189,7 @@ const extractFinnData = () => {
     getText('[data-testid="common-cost"]') || getText('[data-testid="common-cost"] + div')
   ];
 
-  // Last 3 date fields: Visning (with time), Sist endret, Timestamp
+  // Date fields: Visning (with time), Sist endret, Timestamp
   const viewingEl = document.querySelector('[data-testid^="viewings-"]');
   const viewingDateText = viewingEl?.querySelector('.capitalize-first')?.innerText?.trim() || '';
   const viewingTimeText = viewingEl?.innerText || '';
@@ -162,6 +200,15 @@ const extractFinnData = () => {
   }
   fields.push(getTextByLabel('Sist endret'));
   fields.push(makeTimestamp());
+
+  // Matrikkelinfo (4 fields) + Megler (1 field) — after date fields to match Excel column order
+  const cadastreText = getText('[data-testid="cadastre-info"]');
+  const cadastre = parseCadastre(cadastreText);
+  fields.push(cadastre.kommune);
+  fields.push(cadastre.gaard);
+  fields.push(cadastre.bruk);
+  fields.push(cadastre.seksjon);
+  fields.push(getFinnBroker());
 
   // Count non-empty fields (skip URL and timestamp)
   const dataFields = fields.slice(1, -1);
